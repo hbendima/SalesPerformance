@@ -32,6 +32,15 @@ const DOMAIN_COLORS = {
   'Klium.com': { bg: '#e0e7ff', color: '#1e3a8a', bar: '#1e40af' },
 };
 
+function fmtDagShort(isoDate) {
+  if (!isoDate) return '';
+  const d = new Date(String(isoDate).substring(0, 10) + 'T12:00:00');
+  return d.toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function dagDisplay(dag, datum) {
+  return dag === 'Vorige week' && datum ? fmtDagShort(datum) : dag;
+}
+
 // ── Month helpers ────────────────────────────────────────
 const curYM = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; };
 function shiftMonth(ym, delta) {
@@ -150,7 +159,7 @@ function SummaryBlock({ row, dag, compareRow }) {
     <div className="fade-up">
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, gap: 10, flexWrap: 'wrap' }}>
         <div style={{ background: ds.bg, color: '#fff', borderRadius: 8, padding: '5px 14px', fontSize: '0.82rem', fontWeight: 700, boxShadow: ds.shadow }}>
-          {dag}
+          {dagDisplay(dag, row.Datum)}
         </div>
         <span style={{ color: '#9ca3af', fontSize: '0.85rem', fontWeight: 500 }}>{row.Datum}</span>
         {dag === 'Vandaag' && (
@@ -178,16 +187,28 @@ function SummaryBlock({ row, dag, compareRow }) {
 }
 
 // ── Domein tabel ─────────────────────────────────────────
-function DomainTable({ rows }) {
+function DomainTable({ rows, datumByDag }) {
+  const [expanded, setExpanded] = useState({});
+  const toggle = dag => setExpanded(e => ({ ...e, [dag]: !e[dag] }));
+
   if (!rows?.length) return <div style={{ color: '#9ca3af', fontStyle: 'italic' }}>Geen data</div>;
 
-  // Aandeel = % van het dagelijks totaal (per Datum)
-  const totalByDate = {};
-  rows.forEach(r => { totalByDate[r.Datum] = (totalByDate[r.Datum] || 0) + (r.Revenue || 0); });
+  const grouped = {};
+  rows.forEach(r => {
+    if (!grouped[r.Dag]) grouped[r.Dag] = { Dag: r.Dag, Datum: r.Datum, domainRows: [], totRev: 0, totGM: 0, totOrders: 0, totLines: 0 };
+    const g = grouped[r.Dag];
+    g.domainRows.push(r);
+    g.totRev    += r.Revenue || 0;
+    g.totGM     += r.GM      || 0;
+    g.totOrders += r.Orders  || 0;
+    g.totLines  += r.Lines   || 0;
+  });
 
-  const th = { padding: '11px 16px', textAlign: 'left', background: '#f8fafc', borderBottom: '2px solid #e5e7eb', fontSize: '0.75rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' };
-  const td = { padding: '12px 16px', borderBottom: '1px solid #f1f5f9', fontSize: '0.9rem', verticalAlign: 'middle' };
-  const tdr = { ...td, textAlign: 'right' };
+  const th   = { padding: '11px 16px', textAlign: 'left', background: '#f8fafc', borderBottom: '2px solid #e5e7eb', fontSize: '0.75rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' };
+  const td   = { padding: '12px 16px', borderBottom: '1px solid #f1f5f9', fontSize: '0.9rem', verticalAlign: 'middle' };
+  const tdr  = { ...td, textAlign: 'right' };
+  const tds  = { padding: '9px 16px 9px 40px', borderBottom: '1px solid #f1f5f9', fontSize: '0.88rem', verticalAlign: 'middle', background: '#fafbfd' };
+  const tdrs = { ...tds, textAlign: 'right' };
 
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -206,34 +227,72 @@ function DomainTable({ rows }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
-            const dc = DOMAIN_COLORS[r.Domain] || { bg: '#f3f4f6', color: '#374151' };
-            const barPct = totalByDate[r.Datum] > 0 ? (r.Revenue / totalByDate[r.Datum]) * 100 : 0;
+          {DAYS.map(dag => {
+            const g = grouped[dag];
+            if (!g) return null;
+            const ds = DAG_STYLE[dag] || DAG_STYLE['Vorige week'];
+            const totGMPct    = g.totRev > 0 ? (g.totGM / g.totRev) * 100 : 0;
+            const totGemOrder = g.totOrders > 0 ? g.totRev / g.totOrders : 0;
+            const isOpen = !!expanded[dag];
+            const datum = datumByDag?.[dag] || g.Datum;
+            const label = dagDisplay(dag, datum);
             return (
-              <tr className="domain-row" key={i} style={{ background: '#fff' }}>
-                <td style={td}>
-                  <span style={{ background: (DAG_STYLE[r.Dag] || DAG_STYLE['Vorige week']).bg, color: '#fff', borderRadius: 6, padding: '3px 10px', fontSize: '0.74rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{r.Dag}</span>
-                </td>
-                <td style={td}>
-                  <span style={{ background: dc.bg, color: dc.color, borderRadius: 6, padding: '3px 10px', fontSize: '0.82rem', fontWeight: 700 }}>
-                    {r.Domain}
-                  </span>
-                </td>
-                <td style={{ ...tdr, fontWeight: 700, color: '#111' }}>{EUR(r.Revenue)}</td>
-                <td style={{ ...td, minWidth: 120 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1, height: 6, background: '#e5e7eb', borderRadius: 99, overflow: 'hidden' }}>
-                      <div style={{ width: `${barPct}%`, height: '100%', background: dc.bar || dc.color, borderRadius: 99, transition: 'width 0.6s ease' }} />
+              <React.Fragment key={dag}>
+                {/* Samenvatting rij */}
+                <tr className="domain-row" onClick={() => toggle(dag)} style={{ background: '#fff', cursor: 'pointer' }}>
+                  <td style={{ ...td, paddingLeft: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 18, height: 18, borderRadius: 4,
+                        background: isOpen ? ds.bg : '#e5e7eb',
+                        color: isOpen ? '#fff' : '#9ca3af',
+                        fontSize: '0.6rem', fontWeight: 900, transition: 'all 0.15s', flexShrink: 0
+                      }}>{isOpen ? '▲' : '▼'}</span>
+                      <span style={{ background: ds.bg, color: '#fff', borderRadius: 6, padding: '3px 10px', fontSize: '0.74rem', fontWeight: 700, whiteSpace: 'nowrap', boxShadow: ds.shadow }}>
+                        {label}
+                      </span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: '#9ca3af', minWidth: 36, textAlign: 'right' }}>{barPct.toFixed(0)}%</span>
-                  </div>
-                </td>
-                <td style={{ ...tdr, color: '#374151' }}>{EUR(r.GM)}</td>
-                <td style={{ ...tdr, color: gmColor(r.GMPct), fontWeight: 700 }}>{PCT(r.GMPct)}</td>
-                <td style={tdr}>{NUM(r.Orders)}</td>
-                <td style={tdr}>{NUM(r.Lines)}</td>
-                <td style={tdr}>{EUR(r.GemOrder)}</td>
-              </tr>
+                  </td>
+                  <td style={{ ...td, color: '#9ca3af', fontSize: '0.8rem', fontStyle: 'italic' }}>{g.domainRows.length} domeinen</td>
+                  <td style={{ ...tdr, fontWeight: 800, color: '#0f1729', fontSize: '0.95rem' }}>{EUR(g.totRev)}</td>
+                  <td style={td}>—</td>
+                  <td style={{ ...tdr, color: '#374151', fontWeight: 700 }}>{EUR(g.totGM)}</td>
+                  <td style={{ ...tdr, color: gmColor(totGMPct), fontWeight: 800 }}>{PCT(totGMPct)}</td>
+                  <td style={{ ...tdr, fontWeight: 700 }}>{NUM(g.totOrders)}</td>
+                  <td style={{ ...tdr, fontWeight: 700 }}>{NUM(g.totLines)}</td>
+                  <td style={{ ...tdr, fontWeight: 700 }}>{EUR(totGemOrder)}</td>
+                </tr>
+                {/* Domein sub-rijen */}
+                {isOpen && g.domainRows.map((r, i) => {
+                  const dc = DOMAIN_COLORS[r.Domain] || { bg: '#f3f4f6', color: '#374151' };
+                  const barPct = g.totRev > 0 ? (r.Revenue / g.totRev) * 100 : 0;
+                  return (
+                    <tr className="domain-row" key={i} style={{ background: '#fafbfd' }}>
+                      <td style={tds} />
+                      <td style={tds}>
+                        <span style={{ background: dc.bg, color: dc.color, borderRadius: 6, padding: '3px 10px', fontSize: '0.82rem', fontWeight: 700 }}>
+                          {r.Domain}
+                        </span>
+                      </td>
+                      <td style={{ ...tdrs, fontWeight: 700, color: '#111' }}>{EUR(r.Revenue)}</td>
+                      <td style={{ ...tds, minWidth: 120 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ flex: 1, height: 6, background: '#e5e7eb', borderRadius: 99, overflow: 'hidden' }}>
+                            <div style={{ width: `${barPct}%`, height: '100%', background: dc.bar || dc.color, borderRadius: 99, transition: 'width 0.6s ease' }} />
+                          </div>
+                          <span style={{ fontSize: '0.75rem', color: '#9ca3af', minWidth: 36, textAlign: 'right' }}>{barPct.toFixed(0)}%</span>
+                        </div>
+                      </td>
+                      <td style={{ ...tdrs, color: '#374151' }}>{EUR(r.GM)}</td>
+                      <td style={{ ...tdrs, color: gmColor(r.GMPct), fontWeight: 700 }}>{PCT(r.GMPct)}</td>
+                      <td style={tdrs}>{NUM(r.Orders)}</td>
+                      <td style={tdrs}>{NUM(r.Lines)}</td>
+                      <td style={tdrs}>{EUR(r.GemOrder)}</td>
+                    </tr>
+                  );
+                })}
+              </React.Fragment>
             );
           })}
         </tbody>
@@ -315,8 +374,8 @@ function TopProductsTable({ rows, dag, onSelect }) {
 const DAY_ORDER = { 'Vorige week': 0, 'Gisteren': 1, 'Vandaag': 2 };
 const sortDays = (a, b) => (DAY_ORDER[a.dag] ?? 3) - (DAY_ORDER[b.dag] ?? 3);
 
-function DailyRevenueChart({ data, loading }) {
-  const [vis, setVis] = useState({ OE: true, Budget: true, Margin: true });
+function DailyRevenueChart({ data, loading, month }) {
+  const [vis, setVis] = useState({ OE: true, Budget: true, Margin: true, DynBudget: true });
   const toggle = k => setVis(v => ({ ...v, [k]: !v[k] }));
 
   const fmtEur  = v => v >= 1000 ? `\u20ac${(v/1000).toFixed(0)}k` : `\u20ac${v}`;
@@ -326,33 +385,60 @@ function DailyRevenueChart({ data, loading }) {
   if (!data?.length) return <div style={{ textAlign: 'center', padding: 48, color: '#9ca3af' }}>Geen data</div>;
 
   // KPI totals
-  const totalOE  = data.reduce((s, d) => s + (d.OrderEntry || 0), 0);
-  const totalBdg = data.reduce((s, d) => s + (d.DailyBudget || 0), 0);
-  const daysM    = data.filter(d => d.MarginPct != null);
-  const avgM     = daysM.length ? daysM.reduce((s, d) => s + d.MarginPct, 0) / daysM.length : null;
-  const ratio    = totalBdg > 0 ? (totalOE / totalBdg) * 100 : null;
+  const totalOE   = data.reduce((s, d) => s + (d.OrderEntry || 0), 0);
+  const monthBdg  = data.find(d => (d.MonthBudget || 0) > 0)?.MonthBudget || 0;
+  const daysM     = data.filter(d => d.MarginPct != null);
+  const avgM      = daysM.length ? daysM.reduce((s, d) => s + d.MarginPct, 0) / daysM.length : null;
+  const ratio     = monthBdg > 0 ? (totalOE / monthBdg) * 100 : null;
+  const lastDyn   = [...data].reverse().find(d => d.DynBudget != null)?.DynBudget ?? null;
+  const isMonthOver      = month != null && month < curYM();
+  const isBudgetExceeded = ratio != null && ratio >= 100 && !isMonthOver;
+  const monthDiff = totalOE - monthBdg;
+
+  let kpiTeBehalen;
+  if (isMonthOver) {
+    kpiTeBehalen = {
+      label: monthDiff >= 0 ? 'Maand overschot' : 'Budget tekort',
+      value: EUR(Math.abs(monthDiff)),
+      color: monthDiff >= 0 ? '#10b981' : '#ef4444',
+    };
+  } else if (isBudgetExceeded) {
+    kpiTeBehalen = {
+      label: 'Boven budget',
+      value: EUR(monthDiff),
+      color: '#10b981',
+    };
+  } else {
+    kpiTeBehalen = {
+      label: 'Te behalen/dag',
+      value: lastDyn != null ? EUR(lastDyn) : '\u2014',
+      color: '#0d9488',
+    };
+  }
 
   const kpis = [
-    { label: 'Order Entry', value: EUR(totalOE), color: '#1e40af' },
-    { label: 'Dagbudget',   value: EUR(totalBdg), color: '#f97316' },
-    { label: 'Gem. Marge',  value: avgM != null ? PCT(avgM) : '\u2014', color: avgM != null ? gmColor(avgM) : '#9ca3af' },
-    { label: 'OE / Budget', value: ratio != null ? `${ratio.toFixed(1)}%` : '\u2014', color: ratio != null ? (ratio >= 100 ? '#10b981' : '#ef4444') : '#9ca3af' },
+    { label: 'Order Entry', value: EUR(totalOE),                                            color: '#1e40af' },
+    { label: 'Maandbudget', value: EUR(monthBdg),                                           color: '#f97316' },
+    { label: 'OE / Budget', value: ratio != null ? `${ratio.toFixed(1)}%` : '\u2014',       color: ratio != null ? (ratio >= 100 ? '#10b981' : '#ef4444') : '#9ca3af' },
+    { label: 'Gem. Marge',  value: avgM  != null ? PCT(avgM) : '\u2014',                    color: avgM  != null ? gmColor(avgM) : '#9ca3af' },
+    kpiTeBehalen,
   ];
 
   const pills = [
-    { key: 'OE',     label: 'Order Entry', color: '#1e40af' },
-    { key: 'Budget', label: 'Dagbudget',   color: '#f97316' },
-    { key: 'Margin', label: 'Marge %',     color: '#d97706' },
+    { key: 'OE',        label: 'Order Entry',   color: '#1e40af' },
+    { key: 'Budget',    label: 'Dagbudget',     color: '#f97316' },
+    { key: 'DynBudget', label: 'Dyn. Budget',   color: '#0d9488' },
+    { key: 'Margin',    label: 'Marge %',       color: '#eab308' },
   ];
 
   return (
     <div>
       {/* KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 16 }}>
         {kpis.map(k => (
           <div key={k.label} style={{ background: '#f8fafc', borderRadius: 10, padding: '10px 14px', borderLeft: `3px solid ${k.color}` }}>
             <div style={{ fontSize: '0.65rem', color: '#9ca3af', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 4 }}>{k.label}</div>
-            <div style={{ fontSize: '1.05rem', fontWeight: 900, color: k.label === 'Gem. Marge' || k.label === 'OE / Budget' ? k.color : '#0f1729' }}>{k.value}</div>
+            <div style={{ fontSize: '1.05rem', fontWeight: 900, color: ['Gem. Marge','OE / Budget','Te behalen/dag','Boven budget','Maand overschot','Budget tekort'].includes(k.label) ? k.color : '#0f1729' }}>{k.value}</div>
           </div>
         ))}
       </div>
@@ -370,7 +456,7 @@ function DailyRevenueChart({ data, loading }) {
             transition: 'all 0.15s ease',
             opacity: vis[key] ? 1 : 0.65,
           }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: vis[key] ? 'rgba(255,255,255,0.8)' : color, display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ width: 7, height: 7, borderRadius: key === 'DynBudget' ? 2 : '50%', background: vis[key] ? 'rgba(255,255,255,0.8)' : color, display: 'inline-block', flexShrink: 0 }} />
             {label}
           </button>
         ))}
@@ -382,7 +468,7 @@ function DailyRevenueChart({ data, loading }) {
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="Datum" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
           <YAxis yAxisId="left" tickFormatter={fmtEur} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-          <YAxis yAxisId="right" orientation="right" tickFormatter={fmtPct} tick={{ fontSize: 11, fill: '#d97706' }} axisLine={false} tickLine={false} domain={[0, 'auto']} />
+          <YAxis yAxisId="right" orientation="right" tickFormatter={fmtPct} tick={{ fontSize: 11, fill: '#eab308' }} axisLine={false} tickLine={false} domain={[0, 'auto']} />
           <Tooltip
             formatter={(v, n) => {
               if (n === 'Marge %') return [`${Number(v).toFixed(2)}\u00a0%`, n];
@@ -393,10 +479,12 @@ function DailyRevenueChart({ data, loading }) {
             cursor={{ fill: 'rgba(15,23,41,0.04)' }}
           />
           <Brush dataKey="Datum" height={20} stroke="#e5e7eb" fill="#f8fafc" travellerWidth={7} tickFormatter={() => ''} />
-          <Bar yAxisId="left"  dataKey="OrderEntry" name="Order Entry" fill="#1e40af" hide={!vis.OE}     maxBarSize={26} radius={[3,3,0,0]} />
-          <Bar yAxisId="left"  dataKey="DailyBudget" name="Dagbudget"  fill="#f97316" hide={!vis.Budget} maxBarSize={26} radius={[3,3,0,0]} opacity={0.85} />
-          <Line yAxisId="right" type="monotone" dataKey="MarginPct" name="Marge %" stroke="#d97706" strokeWidth={2.5} hide={!vis.Margin}
-            dot={{ fill: '#d97706', r: 3, strokeWidth: 1.5, stroke: '#fff' }} activeDot={{ r: 7 }} connectNulls />
+          <Bar  yAxisId="left"  dataKey="OrderEntry"  name="Order Entry"  fill="#1e40af" hide={!vis.OE}        maxBarSize={26} radius={[3,3,0,0]} />
+          <Bar  yAxisId="left"  dataKey="DailyBudget" name="Dagbudget"    fill="#f97316" hide={!vis.Budget}    maxBarSize={26} radius={[3,3,0,0]} opacity={0.85} />
+          <Line yAxisId="left"  type="monotone" dataKey="DynBudget"   name="Dyn. Budget" stroke="#0d9488" strokeWidth={2} strokeDasharray="6 3" hide={!vis.DynBudget}
+            dot={{ fill: '#0d9488', r: 3, strokeWidth: 1.5, stroke: '#fff' }} activeDot={{ r: 6 }} connectNulls={false} />
+          <Line yAxisId="right" type="monotone" dataKey="MarginPct"   name="Marge %"     stroke="#eab308" strokeWidth={2.5} hide={!vis.Margin}
+            dot={{ fill: '#eab308', r: 3, strokeWidth: 1.5, stroke: '#fff' }} activeDot={{ r: 7 }} connectNulls />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -450,6 +538,8 @@ function ProductModal({ product, allProducts, onClose }) {
 
   if (!product) return null;
 
+  const mdatumByDag = (allProducts || []).reduce((m, r) => { m[r.Dag] = r.Datum; return m; }, {});
+
   // Aggregeer per dag over alle producten met dezelfde CallName
   const crossDay = DAYS.map(dag => {
     const rows = (allProducts || []).filter(r => r.CallName === product.CallName && r.Dag === dag);
@@ -501,7 +591,7 @@ function ProductModal({ product, allProducts, onClose }) {
           {/* Dag badge */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <span style={{ background: (DAG_STYLE[product.Dag] || DAG_STYLE['Vorige week']).bg, color: '#fff', borderRadius: 6, padding: '3px 10px', fontSize: '0.75rem', fontWeight: 700 }}>
-              {product.Dag}
+              {dagDisplay(product.Dag, product.Datum || mdatumByDag[product.Dag])}
             </span>
           </div>
 
@@ -613,8 +703,8 @@ function ProductModal({ product, allProducts, onClose }) {
                 <div key={dag} style={{ display: 'flex', alignItems: 'center', gap: 12, opacity: data ? 1 : 0.38 }}>
                   <div style={{ width: 92, fontSize: '0.78rem', fontWeight: 700, color: '#374151', flexShrink: 0 }}>
                     {isSelected
-                      ? <span style={{ background: ds.bg, color: '#fff', borderRadius: 5, padding: '2px 8px', fontSize: '0.74rem' }}>{dag}</span>
-                      : dag}
+                      ? <span style={{ background: ds.bg, color: '#fff', borderRadius: 5, padding: '2px 8px', fontSize: '0.74rem' }}>{dagDisplay(dag, mdatumByDag[dag])}</span>
+                      : dagDisplay(dag, mdatumByDag[dag])}
                   </div>
                   <div style={{ flex: 1, height: 8, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
                     <div style={{ width: `${barW}%`, height: '100%', borderRadius: 99, background: ds.bg, transition: 'width 0.6s ease 0.1s' }} />
@@ -695,6 +785,7 @@ export default function SalesPerformance() {
   }, [drMonth]);
 
   const getRow = (dag) => summary.find(r => r.Dag === dag);
+  const datumByDag = summary.reduce((m, r) => { m[r.Dag] = r.Datum; return m; }, {});
 
   return (
     <>
@@ -820,7 +911,7 @@ export default function SalesPerformance() {
                       display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>›</button>
                 </div>
-                <DailyRevenueChart data={dailyRevenue} loading={drLoading} />
+                <DailyRevenueChart data={dailyRevenue} loading={drLoading} month={drMonth} />
               </div>
 
               {/* Per domein */}
@@ -838,7 +929,7 @@ export default function SalesPerformance() {
                     return (
                       <div key={dag}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
-                          <span style={{ background: ds.bg, color: '#fff', borderRadius: 6, padding: '2px 10px', fontSize: '0.74rem', fontWeight: 700 }}>{dag}</span>
+                          <span style={{ background: ds.bg, color: '#fff', borderRadius: 6, padding: '2px 10px', fontSize: '0.74rem', fontWeight: 700 }}>{dagDisplay(dag, datumByDag[dag])}</span>
                           <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#111' }}>{EUR(total)}</span>
                         </div>
                         <div style={{ display: 'flex', gap: 2, height: 10, borderRadius: 99, overflow: 'hidden' }}>
@@ -854,7 +945,7 @@ export default function SalesPerformance() {
                 </div>
               </div>
               <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 2px 12px rgba(15,23,41,0.07)', border: '1px solid rgba(0,0,0,0.04)' }}>
-                <DomainTable rows={domains} />
+                <DomainTable rows={domains} datumByDag={datumByDag} />
               </div>
 
               {/* Top 10 producten */}
@@ -880,7 +971,7 @@ export default function SalesPerformance() {
                           color: active ? '#fff' : '#6b7280',
                           boxShadow: active ? ds.shadow : 'none'
                         }}
-                      >{dag}</button>
+                      >{dagDisplay(dag, datumByDag[dag])}</button>
                     );
                   })}
                 </div>
@@ -913,7 +1004,7 @@ export default function SalesPerformance() {
                           color: active ? '#fff' : '#6b7280',
                           boxShadow: active ? ds.shadow : 'none'
                         }}
-                      >{dag}</button>
+                      >{dagDisplay(dag, datumByDag[dag])}</button>
                     );
                   })}
                 </div>

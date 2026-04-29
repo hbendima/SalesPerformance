@@ -275,19 +275,49 @@ router.get('/sales-performance/daily-revenue', async (req, res) => {
   }
 
   const sql = `
+    WITH base AS (
+      SELECT
+        [C].[Date],
+        FORMAT([C].[Date], 'd/MMM', 'nl-BE')             AS Datum,
+        ISNULL([OE].[OE], 0)                             AS OE_raw,
+        ISNULL(ROUND([B].[DailyBudget], 0), 0)           AS DailyBudget,
+        [B].[DailyBudget]                                AS DailyBudgetRaw,
+        CASE WHEN [OE].[OE] IS NOT NULL
+             THEN ROUND([OE].[GM OE%] * 100, 2)
+             ELSE NULL END                               AS MarginPct,
+        [B].[DailyBudget] * DAY(EOMONTH([C].[Date]))     AS MonthBudget,
+        DATEDIFF(DAY,[C].[Date],EOMONTH([C].[Date]))     AS RemainingDays
+      FROM [Klium].[dbo].[Z_CALENDAR] [C]
+      LEFT JOIN [Klium].[dbo].[V_OE_TEMP_0] [OE]
+        ON  [C].[Date] = [OE].[OrderDate]
+      LEFT JOIN [Klium].[dbo].[V_BUDGET_2] [B]
+        ON  [C].[FirstOfMonth] = [B].[Date]
+      WHERE ${dateFilter}
+    ),
+    cumul AS (
+      SELECT *,
+        SUM(OE_raw) OVER (
+          PARTITION BY YEAR([Date]), MONTH([Date])
+          ORDER BY [Date]
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS OE_MTD
+      FROM base
+    )
     SELECT
-      FORMAT([C].[Date], 'd/MMM', 'nl-BE')                        AS Datum,
-      ISNULL(ROUND([OE].[OE], 0), 0)                              AS OrderEntry,
-      ISNULL(ROUND([B].[DailyBudget], 0), 0)                      AS DailyBudget,
-      CASE WHEN [OE].[OE] IS NOT NULL
-           THEN ROUND([OE].[GM OE%] * 100, 2) ELSE NULL END       AS MarginPct
-    FROM [Klium].[dbo].[Z_CALENDAR] [C]
-    LEFT JOIN [Klium].[dbo].[V_OE_TEMP_0] [OE]
-      ON  [C].[Date] = [OE].[OrderDate]
-    LEFT JOIN [Klium].[dbo].[V_BUDGET_2] [B]
-      ON  [C].[FirstOfMonth] = [B].[Date]
-    WHERE ${dateFilter}
-    ORDER BY [C].[Date] ASC
+      Datum,
+      ROUND(OE_raw, 0)                                    AS OrderEntry,
+      DailyBudget,
+      MarginPct,
+      ROUND(ISNULL(MonthBudget, 0), 0)                    AS MonthBudget,
+      CASE
+        WHEN [Date] >= CAST(GETDATE() AS DATE) THEN NULL
+        WHEN DailyBudgetRaw IS NULL             THEN NULL
+        WHEN RemainingDays  = 0                 THEN NULL
+        WHEN (MonthBudget - OE_MTD) < 0         THEN NULL
+        ELSE ROUND((MonthBudget - OE_MTD) / RemainingDays, 0)
+      END AS DynBudget
+    FROM cumul
+    ORDER BY [Date] ASC
   `;
   try {
     res.set('Cache-Control', 'no-store');
