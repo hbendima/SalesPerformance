@@ -1,0 +1,19 @@
+{
+  "name": "sales-performance-backend",
+  "version": "1.0.0",
+  "description": "Backend API voor Klium Sales Performance dashboard",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^5.1.0",
+    "odbc": "^2.4.9"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
